@@ -135,4 +135,26 @@ class BrowserSessionTest {
         assertEquals(CookiePriority.HIGH, SessionCookie.fromHostPinnedBrowserMetadata(url, cookie.toSetCookieHeader())?.priority)
     }
 
+    @Test fun `host-prefixed response cookies require an explicit root Path and no Domain attribute`() {
+        val url = "https://example.com/login".toHttpUrl()
+        for (header in listOf("__Host-login=x; Secure", "__Host-login=x; Secure; Path=relative",
+            "__Host-login=x; Secure; Path=/; Domain=.")) {
+            assertNull(SessionCookie.parse(url, header))
+        }
+        assertNotNull(SessionCookie.parse(url, "__Host-login=x; Secure; Path=/"))
+        assertNotNull(SessionCookie.parse(url, "__Host-login=x; Secure; Path=/; Domain="))
+        val ipCookie = requireNotNull(SessionCookie.parse("https://127.0.0.1/login".toHttpUrl(), "__Host-login=x; Secure; Path=/; Domain=127.0.0.1"))
+        assertTrue(ipCookie.hostOnly)
+        assertNotNull(SessionCookie.fromHostPinnedBrowserMetadata(url, "__Host-login=x; Secure; Path=/; Domain=example.com"))
+    }
+
+    @Test fun `prefix checks follow Chromium case-insensitive and HttpOnly rules`() {
+        val url = "https://example.com/login".toHttpUrl()
+        assertNull(SessionCookie.parse(url, "__hOsT-login=x; Secure"))
+        assertNull(SessionCookie.parse(url, "__sEcUrE-login=x; Path=/"))
+        assertNull(SessionCookie.parse(url, "__hTtP-login=x; Secure"))
+        assertNull(SessionCookie.parse(url, "__Host-Http-login=x; Secure; Path=/"))
+        assertNotNull(SessionCookie.parse(url, "__Host-Http-login=x; Secure; HttpOnly; Path=/"))
+    }
+
 }

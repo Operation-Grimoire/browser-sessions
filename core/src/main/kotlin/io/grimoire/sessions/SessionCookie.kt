@@ -26,8 +26,11 @@ data class SessionCookie(
         require(name.matches(Regex("[!#$%&'*+.^_`|~0-9a-zA-Z-]+"))) { "Invalid cookie name" }
         require(value.all { it.code in 0x20..0x7e && it != ';' }) { "Invalid cookie value" }
         require(path.startsWith('/') && path.none { it.code < 0x20 || it.code == 0x7f || it == ';' }) { "Invalid cookie path" }
-        require(!name.startsWith("__Secure-") || secure) { "Secure cookie prefix requires Secure" }
-        require(!name.startsWith("__Host-") || (secure && hostOnly && path == "/")) { "Host cookie prefix requires host-only Secure scope" }
+        val hostPrefix = name.startsWith("__Host-", ignoreCase = true)
+        val httpPrefix = name.startsWith("__Http-", ignoreCase = true) || name.startsWith("__Host-Http-", ignoreCase = true)
+        require(!(hostPrefix || httpPrefix || name.startsWith("__Secure-", ignoreCase = true)) || secure) { "Cookie prefix requires Secure" }
+        require(!hostPrefix || (hostOnly && path == "/")) { "Host cookie prefix requires host-only root scope" }
+        require(!httpPrefix || httpOnly) { "HTTP cookie prefix requires HttpOnly" }
         require(sameSite != SameSite.NONE || secure) { "SameSite=None requires Secure" }
         require(scopeAccuracy != CookieScopeAccuracy.HOST_PINNED || hostOnly) { "Pinned cookies must be host-only" }
         // Let OkHttp validate and canonicalize the domain too; keep failures free of values.
@@ -66,17 +69,29 @@ data class SessionCookie(
             if (attributes.any { it[0].equals("Partitioned", true) }) return null
             val parsed = Cookie.parse(url, header) ?: return null
             if (parsed.secure && !url.isHttps) return null
+            var normalizeIpHost = false
+            if (!hostPinned && parsed.name.startsWith("__Host-", ignoreCase = true)) {
+                if (attributes.lastOrNull { it[0].equals("Path", true) }?.getOrNull(1) != "/") return null
+                val declaredDomain = attributes.lastOrNull { it[0].equals("Domain", true) }?.getOrNull(1).orEmpty()
+                if (declaredDomain.isNotEmpty()) {
+                    val ipHost = url.host.contains(':') || url.host.split('.').let { parts ->
+                        parts.size == 4 && parts.all { part -> part.toIntOrNull()?.let { it in 0..255 } == true }
+                    }
+                    if (!ipHost || declaredDomain != url.host) return null
+                    normalizeIpHost = true
+                }
+            }
             val sameSite = attributes.lastOrNull { it[0].equals("SameSite", true) }?.getOrNull(1)
                 ?.let { value -> SameSite.entries.firstOrNull { it.headerValue.equals(value, true) } }
             val priority = attributes.lastOrNull { it[0].equals("Priority", true) }?.getOrNull(1)
                 ?.let { value -> CookiePriority.entries.firstOrNull { it.headerValue.equals(value, true) } }
             if (hostPinned && !parsed.matches(url)) return null
             return runCatching {
-                if (!hostPinned) fromCookie(parsed, sameSite, priority)
+                if (!hostPinned && !normalizeIpHost) fromCookie(parsed, sameSite, priority)
                 else SessionCookie(
                     parsed.name, parsed.value, url.host, parsed.path, true, parsed.secure,
                     parsed.httpOnly, parsed.expiresAt.takeIf { parsed.persistent }, sameSite,
-                    CookieScopeAccuracy.HOST_PINNED, priority,
+                    if (hostPinned) CookieScopeAccuracy.HOST_PINNED else CookieScopeAccuracy.EXACT, priority,
                 )
             }.getOrNull()
         }
