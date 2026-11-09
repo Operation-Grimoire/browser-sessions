@@ -14,6 +14,22 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 fun main(args: Array<String>) {
+    try {
+        runBrowserPhase(args)
+    } catch (failure: Throwable) {
+        failure.printStackTrace()
+        System.err.println("CEF state at failure: ${org.cef.CefApp.getState()}")
+        Thread.getAllStackTraces().forEach { (thread, stack) ->
+            System.err.println("Thread ${thread.name}: ${thread.state}")
+            stack.forEach { System.err.println("  at $it") }
+        }
+        // A failed native shutdown can leave Swing alive after main throws.
+        // This is an isolated test process: report failure without hiding the timeout.
+        kotlin.system.exitProcess(1)
+    }
+}
+
+private fun runBrowserPhase(args: Array<String>) {
     val phase = args.single()
     val loads = LinkedBlockingQueue<Pair<String, Int>>()
     val certificate = HeldCertificate.Builder().addSubjectAlternativeName("127.0.0.1").build()

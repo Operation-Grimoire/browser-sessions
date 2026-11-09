@@ -1,3 +1,5 @@
+import java.time.Duration
+
 plugins { kotlin("jvm"); application }
 kotlin { compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11) }
 java { sourceCompatibility = JavaVersion.VERSION_11; targetCompatibility = JavaVersion.VERSION_11 }
@@ -15,6 +17,7 @@ kotlin.sourceSets.getByName("browserTest").kotlin.srcDir("src/browserTest/kotlin
 tasks.register<JavaExec>("browserTest") {
     group = "verification"
     description = "Run native embedded JCEF cookie tests in a separate browser process"
+    timeout.set(Duration.ofMinutes(5))
     classpath = browserTest.runtimeClasspath + sourceSets.main.get().output
     mainClass.set("io.grimoire.sessions.example.BrowserSmokeMainKt")
     workingDir = projectDir
