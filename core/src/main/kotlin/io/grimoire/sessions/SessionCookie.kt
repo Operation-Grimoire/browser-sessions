@@ -23,7 +23,8 @@ data class SessionCookie(
     val priority: CookiePriority? = null,
 ) {
     init {
-        require(name.matches(Regex("[!#$%&'*+.^_`|~0-9a-zA-Z-]+"))) { "Invalid cookie name" }
+        require(name.isNotEmpty() && name.trim() == name &&
+            name.all { it.code in 0x20..0x7e && it != ';' && it != '=' }) { "Invalid cookie name" }
         require(value.all { it.code in 0x20..0x7e && it != ';' }) { "Invalid cookie value" }
         require(path.startsWith('/') && path.none { it.code < 0x20 || it.code == 0x7f || it == ';' }) { "Invalid cookie path" }
         val hostPrefix = name.startsWith("__Host-", ignoreCase = true)

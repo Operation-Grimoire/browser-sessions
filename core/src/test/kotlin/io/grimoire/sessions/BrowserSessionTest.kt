@@ -157,4 +157,15 @@ class BrowserSessionTest {
         assertNotNull(SessionCookie.parse(url, "__Host-Http-login=x; Secure; HttpOnly; Path=/"))
     }
 
+    @Test fun `browser-supported bracketed names survive response and metadata decoding`() {
+        val url = "https://example.com/".toHttpUrl()
+        val cookie = requireNotNull(SessionCookie.parse(url, "session[id]=value; Path=/; HttpOnly"))
+        assertEquals("session[id]", cookie.name)
+        assertEquals(cookie.name, SessionCookie.fromHostPinnedBrowserMetadata(url, cookie.toSetCookieHeader())?.name)
+        assertEquals(cookie.name, cookie.toCookie().name)
+        assertFailsWith<IllegalArgumentException> { cookie.copy(name = "bad;name") }
+        assertFailsWith<IllegalArgumentException> { cookie.copy(name = "bad=name") }
+        assertFailsWith<IllegalArgumentException> { cookie.copy(name = "bad\r\nname") }
+    }
+
 }

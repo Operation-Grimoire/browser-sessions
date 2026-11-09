@@ -96,4 +96,12 @@ class JcefCookieStoreTest {
         assertFalse(called)
     }
 
+    @Test fun `an unrelated bracketed browser cookie does not block authentication cookies`() {
+        val response = """{"cookies":[{"name":"session[id]","value":"one","domain":"example.com","path":"/","secure":true,"httpOnly":true,"expires":-1},{"name":"login","value":"two","domain":"example.com","path":"/","secure":true,"httpOnly":true,"expires":-1}]}"""
+        val store = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture(response) },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        assertEquals(setOf("session[id]", "login"), store.cookiesForRequest(url).map { it.name }.toSet())
+        assertEquals(2, store.snapshot(url).size)
+    }
+
 }
