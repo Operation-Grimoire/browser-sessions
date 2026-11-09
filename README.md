@@ -67,7 +67,11 @@ browser matching remains authoritative. Closing an adapter does not sign out;
 source logout must expire/revoke the actual source session.
 
 JCEF uses its global request context. Configure a dedicated persistent CEF profile;
-custom request contexts are not supported by this adapter. Do not run two CEF
+custom request contexts are not supported by this adapter. JCEF response-cookie
+writes require HTTPS: CDP uses a privileged source context that cannot atomically
+enforce insecure-write protections against browser mutations, so non-TLS response
+writes fail before invoking CDP. Browser-native HTTP reads remain available.
+The Android adapter retains native response-source enforcement. Do not run two CEF
 processes against the same profile. Persistent cookies can survive a clean restart;
 ordinary session cookies follow the host's CEF/WebView persistence settings.
 
@@ -87,7 +91,10 @@ and check HTTP access to the current URL. It supplies the browser user-agent to
 HTTP requests. JCEF downloads its pinned native bundle on first launch; engine
 updates and platform packaging remain the host's release responsibility.
 
-The maintained browser tests use a local HTTP fixture, never a real password.
+The maintained browser tests use local fixtures, never a real password. The
+Windows fixture uses HTTPS with an ephemeral certificate: its public key is pinned
+only in that test browser, and OkHttp trusts only the fixture certificate. The
+example's ordinary startup installs no certificate override.
 For process-restart checks, run the desktop `browserTest` task four times with
 `-PbrowserPhase=publish`, `restore`, `logout`, then `verifyLogout`. Android's
 `WebViewCookieStoreTest#persistentCookieAndLogout` accepts the same `phase`

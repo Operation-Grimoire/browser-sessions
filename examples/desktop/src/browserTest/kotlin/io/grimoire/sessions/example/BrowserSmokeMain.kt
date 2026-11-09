@@ -3,6 +3,8 @@ package io.grimoire.sessions.example
 import io.grimoire.sessions.SameSite
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -14,7 +16,16 @@ import java.util.concurrent.TimeUnit
 fun main(args: Array<String>) {
     val phase = args.single()
     val loads = LinkedBlockingQueue<Pair<String, Int>>()
-    val host = ExampleBrowser(File("build/browser-test/profile"), File("build/jcef-152.0.6"), "about:blank")
+    val certificate = HeldCertificate.Builder().addSubjectAlternativeName("127.0.0.1").build()
+    val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
+    val trustedTls = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+    val spki = java.util.Base64.getEncoder().encodeToString(
+        java.security.MessageDigest.getInstance("SHA-256").digest(certificate.certificate.publicKey.encoded))
+    val host = ExampleBrowser(
+        File("build/browser-test/profile"), File("build/jcef-152.0.6"), "about:blank",
+        configureEngine = { it.addJcefArgs("--ignore-certificate-errors-spki-list=$spki") },
+        configureHttp = { it.sslSocketFactory(trustedTls.sslSocketFactory(), trustedTls.trustManager) },
+    )
     var failure: Throwable? = null
     try {
         host.created.get(30, TimeUnit.SECONDS)
@@ -45,21 +56,27 @@ fun main(args: Array<String>) {
                         else -> MockResponse().setResponseCode(404)
                     }
                 }
-                server.start()
-                check(navigate(server.url("/login").toString()) == 200)
+                server.useHttps(serverTls.sslSocketFactory(), false)
+                server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
+                fun fixture(path: String) = server.url(path).newBuilder().host("127.0.0.1").build()
+                check(navigate(fixture("/login").toString()) == 200)
                 host.browser.executeJavaScript("document.getElementById('login').click()", host.browser.url, 0)
                 val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
                 while (!host.browser.url.endsWith("/private") && System.nanoTime() < deadline) Thread.sleep(50)
                 check(host.browser.url.endsWith("/private"))
-                check(fetch(server.url("/private").toString()) == 200)
-                check(host.store.snapshot(server.url("/private")).single { it.name == "login" }.sameSite == SameSite.STRICT)
-                check(fetch(server.url("/rotate").toString()) == 200)
-                val cookie = host.store.snapshot(server.url("/private")).single { it.name == "login" }
-                check(cookie.value == "http-rotated" && cookie.httpOnly && cookie.hostOnly && cookie.sameSite == SameSite.LAX)
-                check(navigate(server.url("/private").toString()) == 200)
-                check(fetch(server.url("/logout").toString()) == 200)
-                check(fetch(server.url("/private").toString()) == 401)
-                check(navigate(server.url("/private").toString()) == 401)
+                check(fetch(fixture("/private").toString()) == 200)
+                val before = host.store.snapshot(fixture("/private")).single { it.name == "login" }
+                check(before.sameSite == SameSite.STRICT && !before.secure)
+                val httpUrl = fixture("/private").newBuilder().scheme("http").build()
+                val beforeHttpEligible = host.store.cookiesForRequest(httpUrl).any { it.name == "login" }
+                check(fetch(fixture("/rotate").toString()) == 200)
+                val cookie = host.store.snapshot(fixture("/private")).single { it.name == "login" }
+                check(cookie.value == "http-rotated" && cookie.httpOnly && cookie.hostOnly && !cookie.secure && cookie.sameSite == SameSite.LAX)
+                check(host.store.cookiesForRequest(httpUrl).any { it.name == "login" } == beforeHttpEligible)
+                check(navigate(fixture("/private").toString()) == 200)
+                check(fetch(fixture("/logout").toString()) == 200)
+                check(fetch(fixture("/private").toString()) == 401)
+                check(navigate(fixture("/private").toString()) == 401)
             }
             "publish" -> host.store.setCookie(persistent, "restart_login=persisted; Path=/account; Secure; HttpOnly; SameSite=Lax; Max-Age=3600")
             "restore" -> check(host.store.cookiesForRequest(persistent).single { it.name == "restart_login" }.value == "persisted")

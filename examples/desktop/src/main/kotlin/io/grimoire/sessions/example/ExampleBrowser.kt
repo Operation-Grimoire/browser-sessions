@@ -23,7 +23,13 @@ import java.util.concurrent.TimeUnit
 import javax.swing.*
 
 /** A minimal host showing the ownership required by an embedded browser application. */
-class ExampleBrowser(profile: File, natives: File, initialUrl: String) : AutoCloseable {
+class ExampleBrowser(
+    profile: File,
+    natives: File,
+    initialUrl: String,
+    configureEngine: (CefAppBuilder) -> Unit = {},
+    configureHttp: (OkHttpClient.Builder) -> Unit = {},
+) : AutoCloseable {
     val terminated = CompletableFuture<Unit>()
     val created = CompletableFuture<CefBrowser>()
     private val browserClosed = CompletableFuture<Unit>()
@@ -37,7 +43,7 @@ class ExampleBrowser(profile: File, natives: File, initialUrl: String) : AutoClo
     private val httpDelegate = lazy {
         val userAgent = JsonParser.parseString(commands.execute("Browser.getVersion", null)
             .get(10, TimeUnit.SECONDS)).asJsonObject.get("userAgent").asString
-        BrowserSession(store).configure(OkHttpClient.Builder()).addInterceptor { chain ->
+        BrowserSession(store).configure(OkHttpClient.Builder().apply(configureHttp)).addInterceptor { chain ->
             val request = chain.request()
             chain.proceed(if (request.header("User-Agent") == null) request.newBuilder().header("User-Agent", userAgent).build() else request)
         }.build()
@@ -58,6 +64,7 @@ class ExampleBrowser(profile: File, natives: File, initialUrl: String) : AutoClo
                 if (state == CefApp.CefAppState.TERMINATED) terminated.complete(Unit)
             }
         })
+        configureEngine(builder)
         app = builder.build()
         client = app.createClient()
         client.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {

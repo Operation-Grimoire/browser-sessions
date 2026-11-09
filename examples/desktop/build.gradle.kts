@@ -7,7 +7,10 @@ val browserTest = sourceSets.create("browserTest")
 browserTest.compileClasspath += sourceSets.main.get().output
 browserTest.runtimeClasspath += sourceSets.main.get().output
 configurations[browserTest.implementationConfigurationName].extendsFrom(configurations.implementation.get())
-dependencies { add(browserTest.implementationConfigurationName, "com.squareup.okhttp3:mockwebserver:4.12.0") }
+dependencies {
+    add(browserTest.implementationConfigurationName, "com.squareup.okhttp3:mockwebserver:4.12.0")
+    add(browserTest.implementationConfigurationName, "com.squareup.okhttp3:okhttp-tls:4.12.0")
+}
 kotlin.sourceSets.getByName("browserTest").kotlin.srcDir("src/browserTest/kotlin")
 tasks.register<JavaExec>("browserTest") {
     group = "verification"

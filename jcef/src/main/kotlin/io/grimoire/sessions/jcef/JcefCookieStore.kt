@@ -98,10 +98,17 @@ class JcefCookieStore internal constructor(
 
     override fun setCookie(url: HttpUrl, header: String) {
         val cookie = SessionCookie.parse(url, header) ?: return
+        // CDP applies cookies with a simulated secure source and cannot atomically
+        // enforce insecure-response protections against concurrent browser writes.
+        if (!url.isHttps) throw IOException("JCEF cookie response writes require HTTPS")
         val parameters = JsonObject().apply {
             addProperty("name", cookie.name)
             addProperty("value", cookie.value)
-            addProperty("url", url.toString())
+            // CDP ORs Secure with the URL scheme. Use a noncryptographic URL only
+            // to encode a non-Secure cookie, while retaining its actual source metadata.
+            addProperty("url", if (cookie.secure) url.toString() else url.newBuilder().scheme("http").build().toString())
+            addProperty("sourceScheme", "Secure")
+            addProperty("sourcePort", url.port)
             if (!cookie.hostOnly) addProperty("domain", ".${cookie.domain}")
             addProperty("path", cookie.path)
             addProperty("secure", cookie.secure)

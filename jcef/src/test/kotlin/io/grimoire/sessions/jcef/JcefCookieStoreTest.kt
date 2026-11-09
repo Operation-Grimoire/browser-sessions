@@ -73,4 +73,27 @@ class JcefCookieStoreTest {
         assertEquals("x", store.cookiesForRequest(url).single().value)
     }
 
+    @Test fun `HTTPS responses retain a non-Secure flag instead of being upgraded by CDP`() {
+        val store = JcefCookieStore({ method, json ->
+            assertEquals("Network.setCookie", method)
+            val params = JsonParser.parseString(json).asJsonObject
+            assertTrue(params.get("url").asString.startsWith("http://"))
+            assertFalse(params.get("secure").asBoolean)
+            assertEquals("Secure", params.get("sourceScheme").asString)
+            assertFalse(params.has("domain"))
+            CompletableFuture.completedFuture("""{"success":true}""")
+        }, { CompletableFuture.completedFuture(Unit) }, 100)
+        store.setCookie(url, "id=value; Path=/; HttpOnly; SameSite=Lax")
+    }
+
+    @Test fun `insecure mutations cannot reach the privileged setter even for descendant cookie scopes`() {
+        var called = false
+        val store = JcefCookieStore({ _, _ -> called = true; CompletableFuture.completedFuture("{}") },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        assertFailsWith<IOException> {
+            store.setCookie("http://example.com/public".toHttpUrl(), "login=attacker; Domain=example.com; Path=/private")
+        }
+        assertFalse(called)
+    }
+
 }
