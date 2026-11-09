@@ -1,0 +1,135 @@
+name: Build, browser tests, and publish
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-sessions-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install verified Gradle distribution
+        run: bash .github/scripts/install-gradle.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test shared and desktop adapters; build Android and examples
+        run: gradle :core:test :jcef:test :android:assembleRelease :android:lintRelease :examples:desktop:browserTestClasses --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-tests-and-lint
+          path: |
+            **/build/test-results/test/*.xml
+            android/build/reports/lint-results-release.*
+          if-no-files-found: ignore
+  android-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install verified Gradle distribution
+        run: bash .github/scripts/install-gradle.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash .github/scripts/android-browser-tests.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-browser-tests
+          path: |
+            android/build/outputs/androidTest-results/
+            android/build/browser-test/*.log
+          if-no-files-found: ignore
+  windows-browser:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install verified Gradle distribution
+        shell: bash
+        run: bash .github/scripts/install-gradle.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Test embedded Chromium and process restart
+        run: |
+          gradle :examples:desktop:browserTest --no-daemon --stacktrace
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($phase in @('publish', 'restore', 'logout', 'verifyLogout')) {
+            gradle :examples:desktop:browserTest "-PbrowserPhase=$phase" --no-daemon --stacktrace
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-browser-tests
+          path: |
+            examples/desktop/build/browser-test/*.txt
+            examples/desktop/build/browser-test/profile/cef.log
+          if-no-files-found: ignore
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, android-browser, windows-browser]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install verified Gradle distribution
+        run: bash .github/scripts/install-gradle.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the three matching artifacts
+        run: gradle :core:publishLibraryPublicationToGitHubPackagesRepository :android:publishLibraryPublicationToGitHubPackagesRepository :jcef:publishLibraryPublicationToGitHubPackagesRepository --no-daemon --stacktrace
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

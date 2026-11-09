@@ -1,0 +1,107 @@
+package io.grimoire.sessions.jcef
+
+import com.google.gson.JsonParser
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.junit.jupiter.api.Test
+import java.io.IOException
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.test.*
+
+class JcefCookieStoreTest {
+    private val url = "https://example.com/account".toHttpUrl()
+
+    @Test fun `empty cookies complete immediately and queries stay bound to the supplied browser URL`() {
+        val store = JcefCookieStore({ method, json ->
+            assertEquals("Network.getCookies", method)
+            assertEquals(url.toString(), JsonParser.parseString(json).asJsonObject.getAsJsonArray("urls").single().asString)
+            CompletableFuture.completedFuture("""{"cookies": []}""")
+        }, { CompletableFuture.completedFuture(Unit) }, 100)
+        assertTrue(store.cookiesForRequest(url).isEmpty())
+    }
+
+    @Test fun `snapshot preserves native metadata and never exports partitioned state`() {
+        val record = """{"name":"login","value":"secret","domain":"example.com","path":"/","secure":true,"httpOnly":true,"sameSite":"Lax","priority":"High","expires":2000000000}"""
+        val store = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture("""{"cookies":[$record]}""") },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        val cookie = store.snapshot(url).single()
+        assertTrue(cookie.secure && cookie.httpOnly && cookie.hostOnly)
+        assertEquals(2000000000000L, cookie.expiresAt)
+        assertEquals("Lax", cookie.sameSite?.headerValue)
+        assertEquals("High", cookie.priority?.headerValue)
+        assertFalse(cookie.toString().contains("secret"))
+        val partitioned = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture("""{"cookies":[${record.dropLast(1)},"partitionKey":{}}]}""") },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        assertTrue(partitioned.cookiesForRequest(url).isEmpty())
+        assertFailsWith<IllegalStateException> { partitioned.snapshot(url) }
+    }
+
+    @Test fun `writes retain SameSite and host-only semantics`() {
+        val store = JcefCookieStore({ method, json ->
+            assertEquals("Network.setCookie", method)
+            val params = JsonParser.parseString(json).asJsonObject
+            assertEquals("Strict", params.get("sameSite").asString)
+            assertEquals("High", params.get("priority").asString)
+            assertTrue(params.get("httpOnly").asBoolean)
+            assertFalse(params.has("domain"))
+            CompletableFuture.completedFuture("""{"success":true}""")
+        }, { CompletableFuture.completedFuture(Unit) }, 100)
+        store.setCookie(url, "login=value; Secure; HttpOnly; SameSite=Strict; Path=/; Priority=High")
+    }
+
+    @Test fun `timeouts cancel pending work and close interrupts outstanding calls`() {
+        val timed = CompletableFuture<String>()
+        val timeoutStore = JcefCookieStore({ _, _ -> timed }, { CompletableFuture.completedFuture(Unit) }, 30)
+        assertFailsWith<IOException> { timeoutStore.cookiesForRequest(url) }
+        assertTrue(timed.isCancelled)
+        val pending = CompletableFuture<String>()
+        val started = CountDownLatch(1)
+        val store = JcefCookieStore({ _, _ -> started.countDown(); pending }, { CompletableFuture.completedFuture(Unit) }, 5000)
+        val worker = CompletableFuture.supplyAsync { runCatching { store.cookiesForRequest(url) }.exceptionOrNull() }
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        store.close()
+        assertIs<IOException>(worker.get(2, TimeUnit.SECONDS))
+        assertTrue(pending.isCancelled)
+        assertFailsWith<IllegalStateException> { store.cookiesForRequest(url) }
+    }
+    @Test fun `an omitted CDP SameSite property represents an unspecified cookie`() {
+        val record = """{"cookies":[{"name":"id","value":"x","domain":"example.com","path":"/","secure":false,"httpOnly":true,"expires":-1}]}"""
+        val store = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture(record) },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        assertNull(store.snapshot(url).single().sameSite)
+        assertEquals("x", store.cookiesForRequest(url).single().value)
+    }
+
+    @Test fun `HTTPS responses retain a non-Secure flag instead of being upgraded by CDP`() {
+        val store = JcefCookieStore({ method, json ->
+            assertEquals("Network.setCookie", method)
+            val params = JsonParser.parseString(json).asJsonObject
+            assertTrue(params.get("url").asString.startsWith("http://"))
+            assertFalse(params.get("secure").asBoolean)
+            assertEquals("Secure", params.get("sourceScheme").asString)
+            assertFalse(params.has("domain"))
+            CompletableFuture.completedFuture("""{"success":true}""")
+        }, { CompletableFuture.completedFuture(Unit) }, 100)
+        store.setCookie(url, "id=value; Path=/; HttpOnly; SameSite=Lax")
+    }
+
+    @Test fun `insecure mutations cannot reach the privileged setter even for descendant cookie scopes`() {
+        var called = false
+        val store = JcefCookieStore({ _, _ -> called = true; CompletableFuture.completedFuture("{}") },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        assertFailsWith<IOException> {
+            store.setCookie("http://example.com/public".toHttpUrl(), "login=attacker; Domain=example.com; Path=/private")
+        }
+        assertFalse(called)
+    }
+
+    @Test fun `an unrelated bracketed browser cookie does not block authentication cookies`() {
+        val response = """{"cookies":[{"name":"session[id]","value":"one","domain":"example.com","path":"/","secure":true,"httpOnly":true,"expires":-1},{"name":"login","value":"two","domain":"example.com","path":"/","secure":true,"httpOnly":true,"expires":-1}]}"""
+        val store = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture(response) },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        assertEquals(setOf("session[id]", "login"), store.cookiesForRequest(url).map { it.name }.toSet())
+        assertEquals(2, store.snapshot(url).size)
+    }
+
+}
