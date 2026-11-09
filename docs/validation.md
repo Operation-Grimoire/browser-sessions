@@ -8,7 +8,7 @@ Results are recorded after running the named checks. Pending items are not passe
 | JCEF adapter unit tests | Required build job covers command-ordering race, metadata, timeouts and cancellation |
 | Android release AAR and lint | Required build job produces the AAR and lint report |
 | Native Android WebView round trip | Fresh Linux/KVM CI passed; local emulator stability is blocked |
-| Native JCEF round trip | Local Windows and required Windows CI passed with embedded Chromium 152 |
+| Native JCEF round trip | Windows CI passed with embedded Chromium 152; local round trips passed but native shutdown remains unreliable |
 | Separate-process cookie restore/logout | Required Android and Windows CI jobs passed the four process phases |
 | Real-source login/browser-to-HTTP | Pending user participation |
 | macOS/Linux native runtime | Unexecuted |
@@ -31,3 +31,17 @@ The maintained adapter owns a native observer and correlates replies received
 before or after the generated command ID. Unit regressions cover both orders,
 unrelated replies, cancellation and close. The embedded browser round trip passed
 with that binding; publication also requires the Windows CI runtime job.
+
+Later CI run 42596243518 exposed an app/client lock inversion during concurrent
+disposal. The example now initiates application disposal from the browser close
+callback, following JCEF's lifecycle. Run 42598194065 passed all five Windows
+process phases on Java 17 after this fix. Failed test processes print thread
+stacks and exit nonzero; the task and job also have deadlines.
+
+A separate local engine-only reproduction, with no session-library classes on
+its classpath, timed out inside native `CefApp.N_Shutdown` on Java 17.0.13 and
+Microsoft Java 21.0.9/21.0.12. Changing window-disposal order, releasing the global
+cookie-manager reference, and disabling GPU acceleration did not resolve it.
+Those speculative cleanup changes were reverted. The local engine shutdown
+mechanism remains unresolved; passing CI does not establish reliable shutdown
+on this machine. Hosts need acceptance checks for their packaged engine/runtime.
