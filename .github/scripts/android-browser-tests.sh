@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 gradle :android:connectedDebugAndroidTest --no-daemon --stacktrace
-adb install -r android/build/outputs/apk/androidTest/debug/android-debug-androidTest.apk
+adb install -r -t android/build/outputs/apk/androidTest/debug/android-debug-androidTest.apk
 mkdir -p android/build/browser-test
 for phase in publish restore logout verifyLogout; do
   adb shell am force-stop io.grimoire.sessions.android.test

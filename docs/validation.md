@@ -4,12 +4,12 @@ Results are recorded after running the named checks. Pending items are not passe
 
 | Gate | Status |
 | --- | --- |
-| Shared cookie/HTTP regressions | Eight tests passed |
-| JCEF adapter unit tests | Seven tests passed; includes command-ordering race, timeouts and cancellation |
-| Android release AAR and lint | Passed before the metadata-reader refinement; final run pending |
-| Native Android WebView round trip | Local emulator aborted with System has crashed; fresh CI emulator pending |
-| Native JCEF round trip | Passed on Windows with embedded Chromium 152; final CI head pending |
-| Separate-process cookie restore/logout | Pending on Android and Windows |
+| Shared cookie/HTTP regressions | Expanded metadata/scope tests run in the required build job |
+| JCEF adapter unit tests | Required build job covers command-ordering race, metadata, timeouts and cancellation |
+| Android release AAR and lint | Required build job produces the AAR and lint report |
+| Native Android WebView round trip | Fresh Linux/KVM CI passed; local emulator stability is blocked |
+| Native JCEF round trip | Local Windows and required Windows CI passed with embedded Chromium 152 |
+| Separate-process cookie restore/logout | Required Android and Windows CI jobs passed the four process phases |
 | Real-source login/browser-to-HTTP | Pending user participation |
 | macOS/Linux native runtime | Unexecuted |
 | Kotlin/Native | Unimplemented |
@@ -23,7 +23,8 @@ The local Android API 35 emulator restarted system_server during APK installatio
 then aborted instrumentation with `INSTRUMENTATION_ABORTED: System has crashed`.
 That local run is blocked by emulator stability and is not a passing library test.
 CI uses a fresh Linux/KVM emulator and explicitly checks instrumentation success
-for all four separate-process persistence phases.
+for all four separate-process persistence phases. Initial CI run 42583141160 passed
+all three jobs; subsequent fixes are revalidated at each PR head.
 
 Native Windows testing exposed an upstream JCEF convenience-client ordering race.
 The maintained adapter owns a native observer and correlates replies received

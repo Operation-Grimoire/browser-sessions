@@ -58,7 +58,8 @@ pinned to the requested host and marked `HOST_PINNED`. Older providers can still
 supply their native request cookies, but full metadata export fails explicitly.
 Partitioned cookies require additional top-level context: they are excluded from
 JCEF HTTP requests and rejected by metadata export rather than widened into
-ordinary cookies. The Android metadata path excludes them as well.
+ordinary cookies. Android excludes them from metadata-based HTTP lookup, while
+`snapshot()` rejects the export explicitly if any partitioned cookie is present.
 
 The bridge rejects malformed prefixes, insecure SameSite=None and HTTP attempts
 to set or overwrite Secure cookies when scope metadata is available. Native

@@ -109,4 +109,30 @@ class BrowserSessionTest {
         val original = requireNotNull(Cookie.parse(url, "preference=\"dark mode\"; Path=/"))
         assertEquals(original.value, SessionCookie.parse(url, original.toString())?.value)
     }
+    @Test fun `trusted browser metadata normalizes host scope before validating host cookie prefixes`() {
+        val url = "https://example.com/".toHttpUrl()
+        val materialized = "__Host-login=value; Domain=example.com; Path=/; Secure; HttpOnly; SameSite=Lax"
+        val cookie = requireNotNull(SessionCookie.fromHostPinnedBrowserMetadata(url, materialized))
+        assertTrue(cookie.hostOnly && cookie.secure && cookie.httpOnly)
+        assertEquals(CookieScopeAccuracy.HOST_PINNED, cookie.scopeAccuracy)
+        assertEquals("example.com", cookie.domain)
+        assertNull(SessionCookie.parse(url, materialized))
+        assertNull(SessionCookie.fromHostPinnedBrowserMetadata(url, materialized.replace("Domain=example.com", "Domain=other.com")))
+        assertNull(SessionCookie.fromHostPinnedBrowserMetadata(url, "__Host-login=value; Domain=example.com; Path=/"))
+    }
+
+    @Test fun `SameSite whitespace is normalized without bypassing None security`() {
+        val url = "https://example.com/".toHttpUrl()
+        assertEquals(SameSite.NONE, SessionCookie.parse(url, "id=x; Secure; SameSite = None")?.sameSite)
+        assertNull(SessionCookie.parse(url, "id=x; SameSite= None"))
+    }
+
+    @Test fun `cookie eviction priority survives metadata and header conversion`() {
+        val url = "https://example.com/".toHttpUrl()
+        val cookie = requireNotNull(SessionCookie.parse(url, "id=x; Secure; Priority= High"))
+        assertEquals(CookiePriority.HIGH, cookie.priority)
+        assertTrue(cookie.toSetCookieHeader().endsWith("Priority=High"))
+        assertEquals(CookiePriority.HIGH, SessionCookie.fromHostPinnedBrowserMetadata(url, cookie.toSetCookieHeader())?.priority)
+    }
+
 }

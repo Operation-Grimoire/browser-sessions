@@ -100,6 +100,14 @@ class ExampleBrowser(profile: File, natives: File, initialUrl: String) : AutoClo
     }
 
     override fun close() {
+        if (SwingUtilities.isEventDispatchThread()) {
+            if (!closing.get()) {
+                try { worker.execute { close() } } catch (stopped: java.util.concurrent.RejectedExecutionException) {
+                    if (!closing.get()) throw stopped
+                }
+            }
+            return
+        }
         if (!closing.compareAndSet(false, true)) return
         try { if (created.isDone) store.flush() } finally {
             if (created.isDone) { store.close(); commands.close() }
@@ -113,8 +121,7 @@ class ExampleBrowser(profile: File, natives: File, initialUrl: String) : AutoClo
             } finally {
                 client.dispose()
                 app.dispose()
-                SwingUtilities.invokeAndWait { window.dispose() }
-                worker.shutdown()
+                try { SwingUtilities.invokeAndWait { window.dispose() } } finally { worker.shutdown() }
             }
         }
     }

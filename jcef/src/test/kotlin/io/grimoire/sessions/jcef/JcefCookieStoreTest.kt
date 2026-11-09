@@ -22,13 +22,14 @@ class JcefCookieStoreTest {
     }
 
     @Test fun `snapshot preserves native metadata and never exports partitioned state`() {
-        val record = """{"name":"login","value":"secret","domain":"example.com","path":"/","secure":true,"httpOnly":true,"sameSite":"Lax","expires":2000000000}"""
+        val record = """{"name":"login","value":"secret","domain":"example.com","path":"/","secure":true,"httpOnly":true,"sameSite":"Lax","priority":"High","expires":2000000000}"""
         val store = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture("""{"cookies":[$record]}""") },
             { CompletableFuture.completedFuture(Unit) }, 100)
         val cookie = store.snapshot(url).single()
         assertTrue(cookie.secure && cookie.httpOnly && cookie.hostOnly)
         assertEquals(2000000000000L, cookie.expiresAt)
         assertEquals("Lax", cookie.sameSite?.headerValue)
+        assertEquals("High", cookie.priority?.headerValue)
         assertFalse(cookie.toString().contains("secret"))
         val partitioned = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture("""{"cookies":[${record.dropLast(1)},"partitionKey":{}}]}""") },
             { CompletableFuture.completedFuture(Unit) }, 100)
@@ -41,11 +42,12 @@ class JcefCookieStoreTest {
             assertEquals("Network.setCookie", method)
             val params = JsonParser.parseString(json).asJsonObject
             assertEquals("Strict", params.get("sameSite").asString)
+            assertEquals("High", params.get("priority").asString)
             assertTrue(params.get("httpOnly").asBoolean)
             assertFalse(params.has("domain"))
             CompletableFuture.completedFuture("""{"success":true}""")
         }, { CompletableFuture.completedFuture(Unit) }, 100)
-        store.setCookie(url, "login=value; Secure; HttpOnly; SameSite=Strict; Path=/")
+        store.setCookie(url, "login=value; Secure; HttpOnly; SameSite=Strict; Path=/; Priority=High")
     }
 
     @Test fun `timeouts cancel pending work and close interrupts outstanding calls`() {
@@ -63,4 +65,12 @@ class JcefCookieStoreTest {
         assertTrue(pending.isCancelled)
         assertFailsWith<IllegalStateException> { store.cookiesForRequest(url) }
     }
+    @Test fun `an omitted CDP SameSite property represents an unspecified cookie`() {
+        val record = """{"cookies":[{"name":"id","value":"x","domain":"example.com","path":"/","secure":false,"httpOnly":true,"expires":-1}]}"""
+        val store = JcefCookieStore({ _, _ -> CompletableFuture.completedFuture(record) },
+            { CompletableFuture.completedFuture(Unit) }, 100)
+        assertNull(store.snapshot(url).single().sameSite)
+        assertEquals("x", store.cookiesForRequest(url).single().value)
+    }
+
 }

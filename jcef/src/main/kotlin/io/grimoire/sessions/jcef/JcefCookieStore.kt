@@ -4,6 +4,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.grimoire.sessions.BrowserCookieStore
+import io.grimoire.sessions.CookiePriority
 import io.grimoire.sessions.SameSite
 import io.grimoire.sessions.SessionCookie
 import okhttp3.Cookie
@@ -85,6 +86,9 @@ class JcefCookieStore internal constructor(
                 secure = cookie.get("secure").asBoolean,
                 httpOnly = cookie.get("httpOnly").asBoolean,
                 expiresAt = cookie.get("expires")?.asDouble?.takeIf { it > 0 }?.let { (it * 1000).toLong() },
+                priority = cookie.get("priority")?.asString?.let { value ->
+                    requireNotNull(CookiePriority.entries.firstOrNull { it.headerValue == value }) { "Unsupported browser cookie priority" }
+                },
                 sameSite = cookie.get("sameSite")?.asString?.let { value ->
                     requireNotNull(SameSite.entries.firstOrNull { it.headerValue == value }) { "Unsupported browser SameSite metadata" }
                 },
@@ -103,6 +107,7 @@ class JcefCookieStore internal constructor(
             addProperty("secure", cookie.secure)
             addProperty("httpOnly", cookie.httpOnly)
             cookie.sameSite?.let { addProperty("sameSite", it.headerValue) }
+            cookie.priority?.let { addProperty("priority", it.headerValue) }
             cookie.expiresAt?.let { addProperty("expires", it.coerceAtLeast(0) / 1000.0) }
         }
         val result = call("Network.setCookie", parameters)

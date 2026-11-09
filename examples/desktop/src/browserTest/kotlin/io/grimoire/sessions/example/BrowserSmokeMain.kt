@@ -68,18 +68,19 @@ fun main(args: Array<String>) {
             else -> error("Unknown browser-test phase")
         }
         host.store.flush()
-        File("build/browser-test/$phase.txt").apply { parentFile.mkdirs(); writeText("PASS: $phase\n") }
-        println("PASS: embedded JCEF $phase")
     } catch (problem: Throwable) {
         failure = problem
         problem.printStackTrace()
     } finally {
         try {
-            host.close()
-            host.terminated.get(20, TimeUnit.SECONDS)
+            javax.swing.SwingUtilities.invokeAndWait { host.close() }
+            // Closing from the EDT queues flush, browser close and engine shutdown.
+            host.terminated.get(60, TimeUnit.SECONDS)
         } catch (cleanup: Throwable) {
             failure?.addSuppressed(cleanup) ?: run { failure = cleanup }
         }
     }
     failure?.let { throw it }
+    File("build/browser-test/$phase.txt").apply { parentFile.mkdirs(); writeText("PASS: $phase\n") }
+    println("PASS: embedded JCEF $phase")
 }

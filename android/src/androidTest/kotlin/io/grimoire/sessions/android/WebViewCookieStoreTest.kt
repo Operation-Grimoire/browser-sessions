@@ -83,9 +83,9 @@ class WebViewCookieStoreTest {
                 "logout" -> store.setCookie(url, "restart_login=; Path=/account; Secure; Max-Age=0")
                 "verifyLogout" -> assertTrue(store.cookiesForRequest(url).none { cookie -> cookie.name == "restart_login" })
                 null -> {
-                    store.setCookie(url, "flush_check=value; Path=/account; Secure; HttpOnly; Max-Age=3600")
-                    assertTrue(store.snapshot(url).single { cookie -> cookie.name == "flush_check" }.secure)
-                    store.setCookie(url, "flush_check=; Path=/account; Secure; Max-Age=0")
+                    store.setCookie(url, "__Host-flush_check=value; Path=/; Secure; HttpOnly; Max-Age=3600")
+                    assertTrue(store.snapshot(url).single { cookie -> cookie.name == "__Host-flush_check" }.secure)
+                    store.setCookie(url, "__Host-flush_check=; Path=/; Secure; Max-Age=0")
                 }
                 else -> error("Unknown persistence phase")
             }

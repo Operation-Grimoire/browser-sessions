@@ -4,7 +4,6 @@ import android.webkit.CookieManager
 import androidx.webkit.CookieManagerCompat
 import androidx.webkit.WebViewFeature
 import io.grimoire.sessions.BrowserCookieStore
-import io.grimoire.sessions.CookieScopeAccuracy
 import io.grimoire.sessions.SessionCookie
 import okhttp3.Cookie
 import okhttp3.HttpUrl
@@ -16,7 +15,7 @@ class WebViewCookieStore @JvmOverloads constructor(
     override fun cookiesForRequest(url: HttpUrl): List<Cookie> {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.GET_COOKIE_INFO)) {
             return CookieManagerCompat.getCookieInfo(manager, url.toString())
-                .mapNotNull { SessionCookie.parse(url, it)?.toCookie() }
+                .mapNotNull { SessionCookie.fromHostPinnedBrowserMetadata(url, it)?.toCookie() }
         }
         // Legacy WebViews still select the actual request cookies. Full metadata export
         // remains unavailable, and browser-native rules own matching on this path.
@@ -24,6 +23,7 @@ class WebViewCookieStore @JvmOverloads constructor(
             ?.mapNotNull { Cookie.parse(url, it.trim()) }.orEmpty()
     }
 
+    // WebView's two-argument overload is synchronous; the callback overload is asynchronous.
     override fun setCookie(url: HttpUrl, header: String) { manager.setCookie(url.toString(), header) }
 
     override fun snapshot(url: HttpUrl): List<SessionCookie> {
@@ -31,10 +31,9 @@ class WebViewCookieStore @JvmOverloads constructor(
             "This WebView cannot expose full cookie metadata"
         }
         return CookieManagerCompat.getCookieInfo(manager, url.toString()).map { header ->
-            val cookie = requireNotNull(SessionCookie.parse(url, header)) { "WebView returned unsupported cookie metadata" }
-            // Some WebViews materialize Domain even for an originally host-only cookie.
-            // Narrow exports to this exact host instead of inventing subdomain permission.
-            cookie.copy(domain = url.host, hostOnly = true, scopeAccuracy = CookieScopeAccuracy.HOST_PINNED)
+            requireNotNull(SessionCookie.fromHostPinnedBrowserMetadata(url, header)) {
+                "WebView returned unsupported cookie metadata"
+            }
         }
     }
 

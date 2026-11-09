@@ -3,6 +3,8 @@ package io.grimoire.sessions
 import okhttp3.Cookie
 import okhttp3.HttpUrl
 
+enum class CookiePriority(val headerValue: String) { LOW("Low"), MEDIUM("Medium"), HIGH("High") }
+
 enum class SameSite(val headerValue: String) { STRICT("Strict"), LAX("Lax"), NONE("None") }
 enum class CookieScopeAccuracy { EXACT, HOST_PINNED }
 
@@ -18,6 +20,7 @@ data class SessionCookie(
     val expiresAt: Long? = null,
     val sameSite: SameSite? = null,
     val scopeAccuracy: CookieScopeAccuracy = CookieScopeAccuracy.EXACT,
+    val priority: CookiePriority? = null,
 ) {
     init {
         require(name.matches(Regex("[!#$%&'*+.^_`|~0-9a-zA-Z-]+"))) { "Invalid cookie name" }
@@ -38,26 +41,44 @@ data class SessionCookie(
         expiresAt?.let(::expiresAt)
     }.build()
 
-    fun toSetCookieHeader(): String = toCookie().toString() + (sameSite?.let { "; SameSite=${it.headerValue}" } ?: "")
+    fun toSetCookieHeader(): String = toCookie().toString() +
+        (sameSite?.let { "; SameSite=${it.headerValue}" } ?: "") +
+        (priority?.let { "; Priority=${it.headerValue}" } ?: "")
 
     override fun toString() = "SessionCookie(name=$name, domain=$domain, path=$path, value=<redacted>)"
 
     companion object {
-        fun fromCookie(cookie: Cookie, sameSite: SameSite? = null): SessionCookie = SessionCookie(
+        fun fromCookie(cookie: Cookie, sameSite: SameSite? = null, priority: CookiePriority? = null): SessionCookie = SessionCookie(
             cookie.name, cookie.value, cookie.domain, cookie.path, cookie.hostOnly, cookie.secure,
-            cookie.httpOnly, cookie.expiresAt.takeIf { cookie.persistent }, sameSite,
+            cookie.httpOnly, cookie.expiresAt.takeIf { cookie.persistent }, sameSite, priority = priority,
         )
 
         /** Partitioned state requires a top-level context that an ordinary HTTP request lacks. */
-        fun parse(url: HttpUrl, header: String): SessionCookie? {
+        fun parse(url: HttpUrl, header: String): SessionCookie? = decode(url, header, hostPinned = false)
+
+        /** Trusted browser metadata may materialize Domain on an originally host-only cookie. */
+        fun fromHostPinnedBrowserMetadata(url: HttpUrl, header: String): SessionCookie? =
+            decode(url, header, hostPinned = true)
+
+        private fun decode(url: HttpUrl, header: String, hostPinned: Boolean): SessionCookie? {
             if (header.any { it == '\r' || it == '\n' || it == '\u0000' }) return null
-            val attributes = header.split(';').drop(1).map { it.trim().split('=', limit = 2) }
+            val attributes = header.split(';').drop(1).map { it.trim().split('=', limit = 2).map { part -> part.trim() } }
             if (attributes.any { it[0].equals("Partitioned", true) }) return null
             val parsed = Cookie.parse(url, header) ?: return null
             if (parsed.secure && !url.isHttps) return null
             val sameSite = attributes.lastOrNull { it[0].equals("SameSite", true) }?.getOrNull(1)
                 ?.let { value -> SameSite.entries.firstOrNull { it.headerValue.equals(value, true) } }
-            return runCatching { fromCookie(parsed, sameSite) }.getOrNull()
+            val priority = attributes.lastOrNull { it[0].equals("Priority", true) }?.getOrNull(1)
+                ?.let { value -> CookiePriority.entries.firstOrNull { it.headerValue.equals(value, true) } }
+            if (hostPinned && !parsed.matches(url)) return null
+            return runCatching {
+                if (!hostPinned) fromCookie(parsed, sameSite, priority)
+                else SessionCookie(
+                    parsed.name, parsed.value, url.host, parsed.path, true, parsed.secure,
+                    parsed.httpOnly, parsed.expiresAt.takeIf { parsed.persistent }, sameSite,
+                    CookieScopeAccuracy.HOST_PINNED, priority,
+                )
+            }.getOrNull()
         }
     }
 }

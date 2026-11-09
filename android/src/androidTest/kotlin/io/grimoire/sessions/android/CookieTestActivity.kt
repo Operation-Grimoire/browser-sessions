@@ -12,5 +12,9 @@ class CookieTestActivity : Activity() {
         browser.settings.javaScriptEnabled = true
         setContentView(browser)
     }
-    override fun onDestroy() { browser.destroy(); super.onDestroy() }
+    override fun onDestroy() {
+        (browser.parent as? android.view.ViewGroup)?.removeView(browser)
+        browser.destroy()
+        super.onDestroy()
+    }
 }
