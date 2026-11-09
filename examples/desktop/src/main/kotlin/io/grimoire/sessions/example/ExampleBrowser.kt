@@ -88,7 +88,7 @@ class ExampleBrowser(
                 fetch.isEnabled = false
                 worker.execute {
                     val message = runCatching {
-                        http.newCall(Request.Builder().url(url).build()).execute().use { "HTTP ${it.code} for $url" }
+                        http.newCall(Request.Builder().url(url).build()).execute().use { "HTTP ${it.code} at ${it.request.url}" }
                     }.getOrElse { "HTTP check failed: ${it.javaClass.simpleName}" }
                     SwingUtilities.invokeLater { status.text = message; fetch.isEnabled = true }
                 }
