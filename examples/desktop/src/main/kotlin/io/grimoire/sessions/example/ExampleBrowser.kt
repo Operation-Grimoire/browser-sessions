@@ -69,7 +69,12 @@ class ExampleBrowser(
         client = app.createClient()
         client.addLifeSpanHandler(object : CefLifeSpanHandlerAdapter() {
             override fun onAfterCreated(browser: CefBrowser) { created.complete(browser) }
-            override fun onBeforeClose(browser: CefBrowser) { browserClosed.complete(Unit) }
+            override fun onBeforeClose(browser: CefBrowser) {
+                // JCEF finishes client cleanup after this callback. Initiating app
+                // disposal here avoids racing that cleanup from an IO thread.
+                app.dispose()
+                browserClosed.complete(Unit)
+            }
         })
         client.addLoadHandler(object : CefLoadHandlerAdapter() {
             override fun onLoadEnd(browser: CefBrowser, frame: CefFrame, status: Int) {
@@ -123,12 +128,13 @@ class ExampleBrowser(
                 http.dispatcher.executorService.shutdown()
             }
             try {
-                browser.close(true)
+                SwingUtilities.invokeAndWait {
+                    browser.close(true)
+                    window.dispose()
+                }
                 browserClosed.get(20, TimeUnit.SECONDS)
             } finally {
-                client.dispose()
-                app.dispose()
-                try { SwingUtilities.invokeAndWait { window.dispose() } } finally { worker.shutdown() }
+                worker.shutdown()
             }
         }
     }
